@@ -18,10 +18,31 @@ I must do myself (Bluetooth permission, iPhone Shortcut). Never delete anything 
 
 ## How it works / 仕組み
 
-1. iPhone Shortcut turns iPhone Bluetooth **off** when you join home Wi-Fi → the pendant is released (it accepts only one BLE central).
-2. `me.omi-local.watch` (launchd, KeepAlive) does a duty-cycled passive BLE scan (8 s on / 52 s off). When the pendant advertises it pulls **new unread** audio (no ADVANCE/CLEAR), disconnects, transcribes, appends.
-3. Cooldown: re-syncs only after the pendant disappears (>10 min) and reappears, or at most every 60 min while visible.
-4. Output in `~/OmiData/` (outside the repo) → see AGENTS.md "Consuming the data".
+Design: **the Mac is the pendant's only BLE central** (delete the Omi iPhone app and forget the device in iOS Bluetooth settings).
+
+1. `me.omi-local.watch` (launchd, KeepAlive) runs a duty-cycled BLE scan (8 s on / 52 s off, ~0% CPU).
+2. When the pendant appears (and every 15 min while it stays visible) one sync pass runs:
+   set the pendant clock from the Mac → pull **all** unread audio in verified chunks (a dropped link resumes next time) →
+   optional ADVANCE of exactly the verified range → disconnect → transcribe → append to `~/OmiData/days/` + `index.jsonl` →
+   optional deletion of the local audio once the transcript is verified.
+3. Between syncs nothing is connected.
+
+## Data retention / 削除設定 (`~/OmiData/config.json`)
+
+| key | default | meaning |
+|---|---|---|
+| `advance_pendant` | `false` | After a chunk is written, fsynced, re-read (size + sha256) and opus-decodable, send ADVANCE for exactly that range so the pendant frees space. Never past unverified data. Logged to `logs/advance.log`. |
+| `delete_audio_after_transcript` | `false` | Delete `.bin`/`.wav` once the transcript is non-empty and present in both `days/*.md` and `index.jsonl`. Failed or empty transcripts keep their audio. Logged to `logs/delete.log`. |
+| `sync_time` | `true` | Write the Mac's unix time to the pendant on each connect (same as the official app: u32 LE → `19b10031-…`), read back from `19b10032-…`. |
+
+Example (transcripts only, nothing kept on the pendant): `{"advance_pendant": true, "delete_audio_after_transcript": true}`.
+Env `OMI_ADVANCE_PENDANT=0` etc. overrides per run. CLEAR is never sent.
+
+## Mac sleep / スリープ (human step)
+
+Sync only happens while the Mac is awake. Recommended for a desktop/always-plugged Mac (needs your password, do it yourself):
+- System Settings → Battery/Energy → Options → **Prevent automatic sleeping on power adapter when the display is off** = on
+- or `sudo pmset -c sleep 0` (on charger only; revert with `sudo pmset -c sleep 1`). Leave battery settings alone.
 
 ## Commands / コマンド
 
@@ -34,15 +55,14 @@ I must do myself (Bluetooth permission, iPhone Shortcut). Never delete anything 
 | `make logs` | recent log lines (`~/OmiData/logs/`) |
 | `make uninstall` | remove the watcher (keeps code and data) |
 
-Tunables (env in the plist): `OMI_SCAN_ON_S`, `OMI_SCAN_OFF_S`, `OMI_GONE_AFTER_S`, `OMI_RESYNC_MIN`, `OMI_DATA_DIR`.
+Tunables (env in the plist): `OMI_SCAN_ON_S`, `OMI_SCAN_OFF_S`, ``OMI_RESYNC_MIN`, `OMI_DATA_DIR`.
 
-## iPhoneを自動で手放す（ショートカット） / Release the pendant from iPhone automatically
+## Optional: keep the Omi iPhone app / iPhoneアプリを残す場合（ショートカット）
 
-Shortcuts app → オートメーション / Automation:
-1. **Wi-Fi** (select your home network) → **接続時 / When joining** → **すぐに実行 / Run Immediately** → action **Bluetoothを設定: オフ / Set Bluetooth: Off**
-2. **Wi-Fi** (same network) → **接続解除時 / When leaving** → **すぐに実行** → **Bluetoothを設定: オン / On**
-
-Caveat: AirPods / Apple Watch are also disconnected from the iPhone while you're home.
+Only if you keep the official app: the pendant accepts one central, so make the iPhone let go at home.
+Shortcuts → オートメーション: **Wi-Fi** (home network) **接続時 / When joining** → **すぐに実行** → **Bluetoothを設定: オフ**;
+same network **接続解除時 / When leaving** → **Bluetoothを設定: オン**. Caveat: AirPods / Apple Watch disconnect at home.
+Don't enable `advance_pendant` in this mode if you also want the app to get the recordings.
 
 ## Privacy
 `.gitignore` excludes audio, transcripts, models, logs, keys. Data lives only in `~/OmiData`.

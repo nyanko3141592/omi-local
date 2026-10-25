@@ -1,7 +1,7 @@
 # AGENTS.md — for AI agents
 
 Two parts: **Setup procedure** (install on a user's Mac) and **Consuming the data** (read transcripts).
-Hard rules: never send ADVANCE/CLEAR/DELETE to the pendant; never delete `~/OmiData`; never commit data.
+Hard rules: never send CLEAR; ADVANCE/audio deletion only via the config flags in code (never manually); never delete `~/OmiData` transcripts; never commit data.
 
 ## Setup procedure (deterministic)
 
@@ -13,12 +13,18 @@ Hard rules: never send ADVANCE/CLEAR/DELETE to the pendant; never delete `~/OmiD
 3. **Human step: Bluetooth permission** — tell the human: *System Settings → Privacy & Security → Bluetooth → allow "Python"*
    (or approve the prompt that appears). Without it the log shows `scan error … permission` / `timeout`.
    Trigger the prompt with `make sync` from Terminal.
-4. **Human step: iPhone** — turn off iPhone Bluetooth (or quit the Omi app) and press the pendant button once.
-   Then give them the Shortcut steps from README「iPhoneを自動で手放す（ショートカット）」. Do not ask for their SSID.
+4. **Human steps: make the Mac the only central** — tell the human to:
+   (a) delete the Omi iPhone app, (b) iOS Settings → Bluetooth → Omi (i) → **Forget This Device**,
+   (c) press the pendant button once (LED solid red = advertising, not connected).
+   Firmware updates need the app: reinstall it temporarily, update, then delete + forget again.
+   (Alternative if they keep the app: README "Optional: keep the Omi iPhone app" Shortcut; then leave `advance_pendant` off.)
+4b. **Retention** — ask the human, then write `~/OmiData/config.json` (see README "Data retention"). Defaults delete nothing.
+   `{"advance_pendant": true, "delete_audio_after_transcript": true}` = pendant freed after verified transfer, only transcripts kept.
+4c. **Human step: Mac sleep** — recommend README "Mac sleep" (needs sudo; never run pmset yourself).
 5. **Verify** — `make doctor` must exit 0. Then `.venv/bin/python -m omi_local.ring --info` should print firmware/unread
    counts, and `make sync` should create `~/OmiData/days/<today>.md`. If the pendant isn't found: LED blue = still connected to the phone.
 6. **Report** to the human: label `me.omi-local.watch`, stop with `make stop` (`launchctl bootout gui/$(id -u)/me.omi-local.watch`),
-   data at `~/OmiData`. Warn that nothing is deleted from the pendant, so it eventually fills (≈0.2 MB/min audio).
+   data at `~/OmiData`. State the retention config. If `advance_pendant` is off, the pendant eventually fills (≈0.2 MB/min audio). Logs: `~/OmiData/logs/{sync,advance,delete}.log`.
 7. **Uninstall** — `make uninstall` (keeps code and data).
 
 ## Consuming the data (Grok Bots, Codex, any agent with shell on the Mac)
@@ -29,7 +35,7 @@ Data lives OUTSIDE this repo, in `~/OmiData/` (override with `OMI_DATA_DIR`). Ne
 |---|---|
 | `~/OmiData/days/YYYY-MM-DD.md` | One file per day. YAML frontmatter (`date`, `source: omi-pendant`, `format: omi-local/v1`), then one `## HH:MM:SS <!-- id:... -->` section per recording with `- [HH:MM:SS] text` segments (local time, Asia/Tokyo). Append-only. |
 | `~/OmiData/index.jsonl` | One JSON line per recording: `id, date, started_at (unix), segments, md, wav, text`. Append-only. |
-| `~/OmiData/raw/YYYY-MM-DD/` | Raw pendant bytes (`.bin`), decoded `.wav`, whisper `.json`, metadata. |
+| `~/OmiData/raw/YYYY-MM-DD/` | Metadata `.json`, whisper `.whisper.json`; `.bin`/`.wav` audio only until transcribed if `delete_audio_after_transcript` is on (the `wav` path in index may no longer exist). |
 | `~/OmiData/processed/<agent>.json` | Per-agent cursor. |
 
 ## Rules

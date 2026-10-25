@@ -2,6 +2,7 @@
 ~/OmiData/days/YYYY-MM-DD.md (frontmatter + timestamped segments) and ~/OmiData/index.jsonl."""
 import json, os, re, subprocess, time
 from pathlib import Path
+from omi_local import config
 DATA = Path(os.environ.get("OMI_DATA_DIR", Path.home() / "OmiData"))
 MODEL = os.environ.get("WHISPER_MODEL", str(Path(__file__).resolve().parent.parent / "models/ggml-large-v3-turbo.bin"))
 VAD = os.environ.get("WHISPER_VAD_MODEL", str(Path(MODEL).parent / "ggml-silero-v5.1.2.bin"))
@@ -27,7 +28,8 @@ def transcribe(wav: Path):
 def main():
     days = DATA / "days"; days.mkdir(parents=True, exist_ok=True)
     for wav in sorted((DATA / "raw").glob("*/*.wav")):
-        if (wav.parent / (wav.stem + ".done")).exists(): continue
+        if (wav.parent / (wav.stem + ".done")).exists():
+            maybe_delete_audio(wav, f"{wav.parent.name}_{wav.stem}", days / f"{wav.parent.name}.md", None); continue
         meta = json.loads((wav.with_suffix(".json")).read_text()); base = meta["started_at"]
         tmap = meta.get("tmap") or []
         def wall(sec):
@@ -37,7 +39,10 @@ def main():
                 else: break
             return best if best is not None else base + sec
         segs = []
-        for s in transcribe(wav):
+        try: tr = transcribe(wav)
+        except Exception as e:
+            config.log("sync.log", f"transcribe failed {wav.name}: {e!r} (audio kept, retry later)"); continue
+        for s in tr:
             t = s["text"].strip()
             if t and not is_garbage(t): segs.append({"t": wall(s["offsets"]["from"] / 1000), "text": t})
         day = wav.parent.name; rec_id = f"{day}_{wav.stem}"
@@ -51,5 +56,21 @@ def main():
                                 "md": str(md), "wav": str(wav), "text": " ".join(s["text"] for s in segs)}, ensure_ascii=False) + "\n")
         (wav.parent / (wav.stem + ".done")).touch()
         print("transcribed", rec_id, len(segs))
+        maybe_delete_audio(wav, rec_id, md, len(segs))
+
+def maybe_delete_audio(wav, rec_id, md, nsegs):
+    """Delete .bin/.wav only when the transcript is saved and verified. Metadata/whisper json are kept."""
+    if not config.get("delete_audio_after_transcript"): return
+    if nsegs is None:
+        nsegs = max([json.loads(l).get("segments", 0) for l in (DATA / "index.jsonl").open() if json.loads(l).get("id") == rec_id] or [0])
+    if nsegs == 0:
+        config.log("delete.log", f"KEEP {rec_id}: empty transcript"); return
+    in_md = md.exists() and f"id:{rec_id}" in md.read_text()
+    in_idx = any(json.loads(l).get("id") == rec_id and json.loads(l).get("segments", 0) > 0 for l in (DATA / "index.jsonl").open())
+    if not (in_md and in_idx):
+        config.log("delete.log", f"KEEP {rec_id}: verify failed md={in_md} index={in_idx}"); return
+    for ext in (".bin", ".wav"):
+        p = wav.with_suffix(ext)
+        if p.exists(): sz = p.stat().st_size; p.unlink(); config.log("delete.log", f"DELETE {p} ({sz} B) transcript verified")
 
 if __name__ == "__main__": main()

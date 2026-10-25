@@ -1,11 +1,17 @@
-"""Non-destructive reader for Omi firmware >=3.0.20 ring-buffer storage (omi PR #7216).
-Reads unread packets WITHOUT sending ADVANCE/CLEAR, so nothing on the pendant is reclaimed."""
-import argparse, asyncio, json, os, struct, time, wave
+"""Reader for Omi firmware >=3.0.20 ring-buffer storage.
+Per connect: sync pendant clock from the Mac, then pull ALL unread packets in chunks. Each chunk is written,
+fsynced, re-read and verified (size + sha256 + opus decodable) BEFORE anything else. Only if config
+`advance_pendant` is on, ADVANCE is sent for exactly that verified range (logged to logs/advance.log).
+A dropped connection loses at most the in-flight chunk; the next connect resumes from the pendant read_seq /
+local cursor. CLEAR is never sent."""
+import argparse, asyncio, hashlib, json, os, struct, time, wave
 from pathlib import Path
 from bleak import BleakClient, BleakScanner
+from omi_local import config
 CTRL = "30295781-4301-eabd-2904-2849adfeae43"; STATUS = "30295782-4301-eabd-2904-2849adfeae43"
 DIS_FW = "00002a26-0000-1000-8000-00805f9b34fb"
-DATA = Path(os.environ.get("OMI_DATA_DIR", Path.home() / "OmiData"))
+TIME_W = "19b10031-e8f2-537e-4f6c-d104768a1214"; TIME_R = "19b10032-e8f2-537e-4f6c-d104768a1214"
+DATA = config.DATA
 REC = 444
 
 def frames_of(records):
@@ -25,56 +31,115 @@ async def find(address=None):
     if not d: raise SystemExit("pendant not found")
     return d
 
+async def sync_time(c):
+    """Same as the official app (omi_connection.dart performSyncTime): u32 LE unix seconds -> 19b10031."""
+    now = int(time.time())
+    await c.write_gatt_char(TIME_W, struct.pack("<I", now), response=True)
+    try:
+        rb = bytes(await c.read_gatt_char(TIME_R)); dev = struct.unpack("<I", rb[:4])[0]
+        msg = f"time sync wrote={now} readback={dev} diff={dev - int(time.time())}s"
+    except Exception as e:
+        msg = f"time sync wrote={now} readback failed: {e!r}"
+    config.log("sync.log", msg); print(msg)
+
+def fsync_write(p: Path, data: bytes):
+    with open(p, "wb") as f: f.write(data); f.flush(); os.fsync(f.fileno())
+    dfd = os.open(p.parent, os.O_RDONLY); os.fsync(dfd); os.close(dfd)
+
+def save_chunk(buf, rs, meta):
+    """Write .bin/.wav/.json; return (verified: bool, stem path, detail)."""
+    recs = [bytes(buf[i:i + REC]) for i in range(0, len(buf) - REC + 1, REC)]
+    buf = b"".join(recs)
+    ts0 = struct.unpack(">I", recs[0][:4])[0] if recs else 0
+    if ts0 & 0x80000000 or ts0 < 1_500_000_000: ts0 = int(time.time())
+    day = time.strftime("%Y-%m-%d", time.localtime(ts0)); stem = f"{time.strftime('%H%M%S', time.localtime(ts0))}_seq{rs}"
+    d = DATA / "raw" / day; d.mkdir(parents=True, exist_ok=True)
+    sha = hashlib.sha256(buf).hexdigest()
+    fsync_write(d / f"{stem}.bin", buf)
+    import opuslib, io
+    dec = opuslib.Decoder(16000, 1); pcmio = io.BytesIO(); pos = 0; tmap = []; ok = bad = 0
+    for r in recs:
+        rts = struct.unpack(">I", r[:4])[0]
+        if not (rts & 0x80000000): tmap.append([pos / 16000, rts])
+        for f in frames_of([r]):
+            try: pcm = dec.decode(bytes(f), 960); pcmio.write(pcm); pos += len(pcm) // 2; ok += 1
+            except Exception: bad += 1
+    wavp = d / f"{stem}.wav"
+    with wave.open(str(wavp), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(pcmio.getvalue())
+    with open(wavp, "rb+") as f: os.fsync(f.fileno())
+    back = (d / f"{stem}.bin").read_bytes()
+    verified = len(back) == len(recs) * REC and hashlib.sha256(back).hexdigest() == sha and ok > 0 and bad <= 0.1 * (ok + bad)
+    fsync_write(d / f"{stem}.json", json.dumps({"started_at": ts0, "packets": len(recs), "read_seq": rs, "sha256": sha,
+        "frames_ok": ok, "frames_bad": bad, "verified": verified, "tmap": tmap, **meta}).encode())
+    return verified, len(recs), d / stem, f"packets={len(recs)} sha256={sha[:12]} frames ok={ok} bad={bad}"
+
+async def wait_ack(q, t=5):
+    end = time.time() + t
+    while time.time() < end:
+        m = await asyncio.wait_for(q.get(), max(.1, end - time.time()))
+        if m[0] == 0x01: return m[1]
+    return None
+
 async def run(a):
     q = asyncio.Queue()
     async with BleakClient(await find(a.address), timeout=45) as c:
         fw = bytes(await c.read_gatt_char(DIS_FW)).decode(errors="ignore")
+        if config.get("sync_time") and not a.info:
+            try: await sync_time(c)
+            except Exception as e: config.log("sync.log", f"time sync failed: {e!r}")
         st = struct.unpack("<4I", bytes(await c.read_gatt_char(STATUS))[:16])
         await c.start_notify(CTRL, lambda _, d: q.put_nowait(bytes(d)))
-        await c.write_gatt_char(CTRL, bytes([0x10]), response=True)
-        info = None
-        while info is None:
-            m = await asyncio.wait_for(q.get(), 10)
-            if m[0] == 0x02: info = struct.unpack(">QQIQH", m[1:31])
-        rs, ws, cap, dropped, psize = info
+        async def info():
+            await c.write_gatt_char(CTRL, bytes([0x10]), response=True)
+            while True:
+                m = await asyncio.wait_for(q.get(), 10)
+                if m[0] == 0x02: return struct.unpack(">QQIQH", m[1:31])
+        rs, ws, cap, dropped, psize = await info()
         meta = {"fw": fw, "used_bytes": st[0], "unread_packets": st[1], "free_bytes": st[2], "rtc_valid": st[3],
                 "read_seq": rs, "write_seq": ws, "capacity": cap, "dropped": dropped, "packet_size": psize}
         print(json.dumps(meta))
         if a.info: return
+        advance = config.get("advance_pendant"); chunk = a.max_packets or config.get("chunk_packets")
         stf = DATA / "state" / "ring.json"; stf.parent.mkdir(parents=True, exist_ok=True)
-        last = json.loads(stf.read_text()).get("next_seq", 0) if stf.exists() else 0
-        if last > rs and last <= ws: rs = last  # skip packets already saved locally (pendant untouched)
-        if ws - rs <= 0: print(json.dumps({"new_packets": 0})); return
-        n = min(ws - rs, a.max_packets or (ws - rs))
-        buf = bytearray(); t0 = time.time()
-        await c.write_gatt_char(CTRL, bytes([0x11]) + struct.pack(">QI", rs, n), response=True)
-        while True:
-            m = await asyncio.wait_for(q.get(), 30)
-            if m[0] == 0x03: buf += m[1:]
-            elif m[0] == 0x04: break
-            elif m[0] == 0x01 and m[1] != 0: raise SystemExit(f"ack error {m[1]}")
-        dt = time.time() - t0
-        recs = [buf[i:i + REC] for i in range(0, len(buf) - REC + 1, REC)]
-        ts0 = struct.unpack(">I", recs[0][:4])[0] if recs else 0
-        if ts0 & 0x80000000 or ts0 < 1_500_000_000: ts0 = int(time.time())
-        day = time.strftime("%Y-%m-%d", time.localtime(ts0)); stem = f"{time.strftime('%H%M%S', time.localtime(ts0))}_seq{rs}"
-        d = DATA / "raw" / day; d.mkdir(parents=True, exist_ok=True)
-        (d / f"{stem}.bin").write_bytes(buf)
-        import opuslib
-        dec = opuslib.Decoder(16000, 1)
-        with wave.open(str(d / f"{stem}.wav"), "wb") as w:
-            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
-            pos = 0; tmap = []  # [audio_sec, record_unix_ts] so gaps (VAD) map back to wall clock
-            for r in recs:
-                rts = struct.unpack(">I", r[:4])[0]
-                if not (rts & 0x80000000): tmap.append([pos / 16000, rts])
-                for f in frames_of([r]):
-                    try: pcm = dec.decode(bytes(f), 960); w.writeframes(pcm); pos += len(pcm) // 2
-                    except Exception: pass
-        (d / f"{stem}.json").write_text(json.dumps({"started_at": ts0, "packets": len(recs), "read_seq": rs, "tmap": tmap, **meta}))
-        stf.write_text(json.dumps({"next_seq": rs + len(recs)}))
-        print(json.dumps({"saved": str(d / stem), "bytes": len(buf), "packets": len(recs), "sec": round(dt, 1), "kBps": round(len(buf) / 1024 / max(dt, .01), 1)}))
-        # No ADVANCE sent: pendant keeps everything.
+        st_local = json.loads(stf.read_text()) if stf.exists() else {}
+        last = st_local.get("next_seq", 0)
+        verified_upto = st_local.get("verified_upto", 0)
+        # data already saved+verified locally but not yet advanced (e.g. advance failed last time)
+        if advance and verified_upto > rs:
+            await advance_to(c, q, min(verified_upto, ws), rs, "catch-up")
+            rs = min(verified_upto, ws)
+        if rs < last <= ws: rs = last
+        total = 0
+        while ws - rs > 0:
+            n = min(ws - rs, chunk); buf = bytearray(); t0 = time.time()
+            await c.write_gatt_char(CTRL, bytes([0x11]) + struct.pack(">QI", rs, n), response=True)
+            while True:
+                m = await asyncio.wait_for(q.get(), 30)
+                if m[0] == 0x03: buf += m[1:]
+                elif m[0] == 0x04: break
+                elif m[0] == 0x01 and m[1] != 0: raise SystemExit(f"read ack error {m[1]}")
+            ok, got, stem, detail = save_chunk(buf, rs, meta)
+            dt = time.time() - t0
+            print(json.dumps({"saved": str(stem), "verified": ok, "packets": got, "sec": round(dt, 1)}))
+            if not ok or got == 0:
+                config.log("sync.log", f"chunk seq {rs} NOT verified ({detail}); stopping, no advance"); return
+            new = rs + got
+            stf.write_text(json.dumps({"next_seq": new, "verified_upto": new}))
+            if advance: await advance_to(c, q, new, rs, detail)
+            rs = new; total += got
+            if got < n: break
+            ws = max(ws, (await info())[1])
+        config.log("sync.log", f"pulled {total} packets, now at seq {rs}")
+        try: await c.write_gatt_char(CTRL, bytes([0x03]), response=True)
+        except Exception: pass
+
+async def advance_to(c, q, new, old, detail):
+    while not q.empty(): q.get_nowait()
+    await c.write_gatt_char(CTRL, bytes([0x12]) + struct.pack(">Q", new), response=True)
+    s = await wait_ack(q)
+    config.log("advance.log", f"ADVANCE {old}->{new} ({new - old} packets) ack={s} {detail}")
+    if s not in (0, 10): raise SystemExit(f"advance ack {s}")
 
 def main():
     p = argparse.ArgumentParser(); p.add_argument("--address"); p.add_argument("--info", action="store_true")

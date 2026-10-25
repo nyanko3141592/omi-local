@@ -31,12 +31,12 @@ def main(address=None):
     else:
         dev = asyncio.run(present(float(os.environ.get("OMI_SCAN_SECONDS", "20"))))
         if not dev: print("pendant not found"); return  # away: stay quiet
-    signal.alarm(1800)
+    signal.alarm(3500)
     log(f"pendant found {dev.address}")
     from omi_local import ring, transcribe
     class A: address = dev.address; info = False; max_packets = 0
     try:
-        asyncio.run(asyncio.wait_for(ring.run(A), 900))
+        asyncio.run(asyncio.wait_for(ring.run(A), 3000))
         log("pull ok")
     except BaseException as e:
         log(f"pull error: {e!r}")
