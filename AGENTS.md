@@ -10,9 +10,10 @@ Hard rules: never send CLEAR; ADVANCE/audio deletion only via the config flags i
 2. **Install** — `git clone https://github.com/nyanko3141592/omi-local ~/Dev/omi-local && cd ~/Dev/omi-local && ./setup.sh`
    (idempotent: brew `python whisper-cpp opus ffmpeg`, `.venv` + `requirements.txt`, models into `models/`
    (large-v3-turbo 1.5 GB, Silero VAD), `~/OmiData/*`, launchd `me.omi-local.watch`). Re-run safely on any failure.
-3. **Human step: Bluetooth permission** — tell the human: *System Settings → Privacy & Security → Bluetooth → allow "Python"*
-   (or approve the prompt that appears). Without it the log shows `scan error … permission` / `timeout`.
-   Trigger the prompt with `make sync` from Terminal.
+3. **Human step: Bluetooth permission (required, most common failure)** — the watcher is Python started by launchd and
+   needs its own Bluetooth permission; Terminal runs can work while the watcher fails. Tell the human: System Settings → Privacy & Security → Bluetooth → **Python** on. If Python isn't listed, run `cd ~/Dev/omi-local && make sync` in Terminal and allow the prompt. Then `make stop && make start`.
+   Symptom: every line in `~/OmiData/logs/sync-*.log` is `scan error (TimeoutError())`. **Always run `make doctor` after setup and after the
+   first sync**; it FAILs with `Bluetooth permission` in this case. Don't treat the setup as done until it passes.
 4. **Human steps: make the Mac the only central** — tell the human to:
    (a) delete the Omi iPhone app, (b) iOS Settings → Bluetooth → Omi (i) → **Forget This Device**,
    (c) press the pendant button once (LED solid red = advertising, not connected).

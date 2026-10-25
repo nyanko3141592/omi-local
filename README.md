@@ -21,10 +21,15 @@ I must do myself (Bluetooth permission, iPhone Shortcut). Never delete anything 
 After `./setup.sh` (or your agent) finishes:
 1. Delete the Omi iPhone app / iPhoneのOmiアプリを削除
 2. iOS Settings → Bluetooth → Omi (i) → **Forget This Device** / このデバイスの登録を解除
-3. Mac: System Settings → Privacy & Security → Bluetooth → allow **Python**. Trigger the prompt with `cd ~/Dev/omi-local && make sync`.
+3. ⚠️ **Bluetooth permission for Python (required) / PythonのBluetooth許可（必須）** — the watcher is Python started by launchd and cannot scan without it. System Settings → Privacy & Security → Bluetooth → **Python** on. If Python isn't listed, run `cd ~/Dev/omi-local && make sync` in Terminal and allow the prompt. Then `make stop && make start`.
+   Symptom if missing: every log line is `scan error (TimeoutError())`, and `make doctor` reports `Bluetooth permission`. ターミナルからの `make sync` は動くのに自動同期が動かない場合はこれです。
 4. Press the pendant button once / ペンダントのボタンを1回押す
 5. After a few minutes: `make logs` → confirm `time sync`, `pulled`, and (if enabled) `tail ~/OmiData/logs/advance.log` shows `ADVANCE … ack=0`.
 6. Optional: don't sleep on power — System Settings → Battery → Options, or `sudo pmset -c sleep 0`.
+
+### Verified run / 実機確認 (2026-10, Omi CV 1, fw 3.0.21, Apple Silicon Mac)
+First real sync: ~45k packets (~20 MB) pulled and verified in ~7.5 min, 24 verified ADVANCEs (all ack=0), clock skew −1 s after time sync,
+23 recordings transcribed; the one recording with an empty transcript kept its audio as designed.
 
 Daily use, config, troubleshooting, firmware updates, backup: **[docs/OPERATIONS.md](docs/OPERATIONS.md)**.
 

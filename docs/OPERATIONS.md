@@ -48,7 +48,7 @@ summarize, then append the ids to that file. Never edit or delete `days/` or `in
 
 ## Is it healthy? / 正常確認
 
-- `make doctor` all OK.
+- `make doctor` all OK (it also detects the missing Bluetooth permission).
 - After coming home, `make logs` shows `pendant appeared … -> sync`, `time sync … diff=0s`, `pulled N packets`, `transcribe ok`.
 - `tail ~/OmiData/logs/advance.log` shows `ADVANCE a->b … ack=0`.
 - `ls ~/OmiData/days/` has today's file.
@@ -58,7 +58,7 @@ summarize, then append the ids to that file. Never edit or delete `days/` or `in
 | symptom | fix |
 |---|---|
 | Not detected | LED blue = connected to something else (phone). LED solid red = advertising. Press the button once; check battery/charging. |
-| `scan error` / `timeout (Bluetooth permission…)` | System Settings → Privacy & Security → Bluetooth → allow **Python**; trigger with `make sync` in Terminal; then `make stop && make start`. |
+| ⚠️ **Every scan times out** (`scan error (TimeoutError())` on every line; `make doctor`: `Bluetooth permission`) — most common | launchd's Python has no Bluetooth permission (Terminal `make sync` may still work). System Settings → Privacy & Security → Bluetooth → Python on. If Python isn't listed, run `cd ~/Dev/omi-local && make sync` in Terminal and allow the prompt. Then `make stop && make start`. |
 | Phone still paired | Delete the Omi app; iOS Settings → Bluetooth → Omi (i) → Forget This Device. Only one central can connect. |
 | Nothing syncs overnight | Mac was asleep. System Settings → Battery → Options → prevent sleep on power adapter, or `sudo pmset -c sleep 0`. |
 | Transcription failed | Logged as `transcribe failed … (audio kept, retry later)`; it retries on the next sync. Run `make sync` or `.venv/bin/python -m omi_local.transcribe`. Check `make doctor` (model/whisper-cli). |
