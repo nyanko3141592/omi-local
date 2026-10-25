@@ -41,6 +41,10 @@ async def run(a):
                 "read_seq": rs, "write_seq": ws, "capacity": cap, "dropped": dropped, "packet_size": psize}
         print(json.dumps(meta))
         if a.info: return
+        stf = DATA / "state" / "ring.json"; stf.parent.mkdir(parents=True, exist_ok=True)
+        last = json.loads(stf.read_text()).get("next_seq", 0) if stf.exists() else 0
+        if last > rs and last <= ws: rs = last  # skip packets already saved locally (pendant untouched)
+        if ws - rs <= 0: print(json.dumps({"new_packets": 0})); return
         n = min(ws - rs, a.max_packets or (ws - rs))
         buf = bytearray(); t0 = time.time()
         await c.write_gatt_char(CTRL, bytes([0x11]) + struct.pack(">QI", rs, n), response=True)
@@ -60,10 +64,15 @@ async def run(a):
         dec = opuslib.Decoder(16000, 1)
         with wave.open(str(d / f"{stem}.wav"), "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
-            for f in frames_of(recs):
-                try: w.writeframes(dec.decode(bytes(f), 960))
-                except Exception: pass
-        (d / f"{stem}.json").write_text(json.dumps({"started_at": ts0, "packets": len(recs), "read_seq": rs, **meta}))
+            pos = 0; tmap = []  # [audio_sec, record_unix_ts] so gaps (VAD) map back to wall clock
+            for r in recs:
+                rts = struct.unpack(">I", r[:4])[0]
+                if not (rts & 0x80000000): tmap.append([pos / 16000, rts])
+                for f in frames_of([r]):
+                    try: pcm = dec.decode(bytes(f), 960); w.writeframes(pcm); pos += len(pcm) // 2
+                    except Exception: pass
+        (d / f"{stem}.json").write_text(json.dumps({"started_at": ts0, "packets": len(recs), "read_seq": rs, "tmap": tmap, **meta}))
+        stf.write_text(json.dumps({"next_seq": rs + len(recs)}))
         print(json.dumps({"saved": str(d / stem), "bytes": len(buf), "packets": len(recs), "sec": round(dt, 1), "kBps": round(len(buf) / 1024 / max(dt, .01), 1)}))
         # No ADVANCE sent: pendant keeps everything.
 

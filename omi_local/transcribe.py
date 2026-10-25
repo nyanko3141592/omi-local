@@ -9,19 +9,26 @@ WHISPER = os.environ.get("WHISPER_BIN", "/opt/homebrew/bin/whisper-cli")
 def hhmmss(sec): return time.strftime("%H:%M:%S", time.localtime(sec))
 
 def transcribe(wav: Path):
-    out = wav.with_suffix("")
+    out = Path(str(wav.with_suffix("")) + ".whisper")
     subprocess.run([WHISPER, "-m", MODEL, "-l", os.environ.get("WHISPER_LANG", "ja"), "-oj", "-of", str(out), "-np", str(wav)], check=True)
     return json.loads(Path(str(out) + ".json").read_text())["transcription"]
 
 def main():
     days = DATA / "days"; days.mkdir(parents=True, exist_ok=True)
     for wav in sorted((DATA / "raw").glob("*/*.wav")):
-        if Path(str(wav.with_suffix("")) + ".json").exists() and (wav.parent / (wav.stem + ".done")).exists(): continue
+        if (wav.parent / (wav.stem + ".done")).exists(): continue
         meta = json.loads((wav.with_suffix(".json")).read_text()); base = meta["started_at"]
+        tmap = meta.get("tmap") or []
+        def wall(sec):
+            best = None
+            for a, ts in tmap:
+                if a <= sec: best = ts + (sec - a)
+                else: break
+            return best if best is not None else base + sec
         segs = []
         for s in transcribe(wav):
             t = s["text"].strip()
-            if t: segs.append({"t": base + s["offsets"]["from"] / 1000, "text": t})
+            if t: segs.append({"t": wall(s["offsets"]["from"] / 1000), "text": t})
         day = wav.parent.name; rec_id = f"{day}_{wav.stem}"
         md = days / f"{day}.md"
         if not md.exists():
