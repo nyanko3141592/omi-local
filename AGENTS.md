@@ -1,4 +1,27 @@
-# How agents consume this (Grok Bots, Codex "dots", anything with Mac shell)
+# AGENTS.md — for AI agents
+
+Two parts: **Setup procedure** (install on a user's Mac) and **Consuming the data** (read transcripts).
+Hard rules: never send ADVANCE/CLEAR/DELETE to the pendant; never delete `~/OmiData`; never commit data.
+
+## Setup procedure (deterministic)
+
+1. **Prereqs** — check and stop with a clear message if missing:
+   `uname -sm` → `Darwin arm64` (Intel works but slower); `command -v brew` (else ask the human to install https://brew.sh); ~3 GB free disk.
+2. **Install** — `git clone https://github.com/nyanko3141592/omi-local ~/Dev/omi-local && cd ~/Dev/omi-local && ./setup.sh`
+   (idempotent: brew `python whisper-cpp opus ffmpeg`, `.venv` + `requirements.txt`, models into `models/`
+   (large-v3-turbo 1.5 GB, Silero VAD), `~/OmiData/*`, launchd `me.omi-local.watch`). Re-run safely on any failure.
+3. **Human step: Bluetooth permission** — tell the human: *System Settings → Privacy & Security → Bluetooth → allow "Python"*
+   (or approve the prompt that appears). Without it the log shows `scan error … permission` / `timeout`.
+   Trigger the prompt with `make sync` from Terminal.
+4. **Human step: iPhone** — turn off iPhone Bluetooth (or quit the Omi app) and press the pendant button once.
+   Then give them the Shortcut steps from README「iPhoneを自動で手放す（ショートカット）」. Do not ask for their SSID.
+5. **Verify** — `make doctor` must exit 0. Then `.venv/bin/python -m omi_local.ring --info` should print firmware/unread
+   counts, and `make sync` should create `~/OmiData/days/<today>.md`. If the pendant isn't found: LED blue = still connected to the phone.
+6. **Report** to the human: label `me.omi-local.watch`, stop with `make stop` (`launchctl bootout gui/$(id -u)/me.omi-local.watch`),
+   data at `~/OmiData`. Warn that nothing is deleted from the pendant, so it eventually fills (≈0.2 MB/min audio).
+7. **Uninstall** — `make uninstall` (keeps code and data).
+
+## Consuming the data (Grok Bots, Codex, any agent with shell on the Mac)
 
 Data lives OUTSIDE this repo, in `~/OmiData/` (override with `OMI_DATA_DIR`). Never commit it.
 
@@ -29,4 +52,4 @@ PY
 ```
 
 ## Sync timing
-New data arrives only while the iPhone has released the pendant (see README「iPhoneを自動で手放す（ショートカット）」) and the Mac's `me.omi-local.sync` launchd job runs (every 15 min). Treat `index.jsonl` as append-only.
+New data appears only after the pendant was released by the iPhone and the watcher synced (usually within ~1 min of arriving home + transfer/transcribe time). `index.jsonl` is append-only.

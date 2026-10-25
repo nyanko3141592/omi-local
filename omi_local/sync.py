@@ -17,15 +17,20 @@ async def present(timeout=20):
         timeout=timeout)
     return d
 
-def main():
+def main(address=None):
     DATA.mkdir(parents=True, exist_ok=True)
     lock = open(DATA / ".sync.lock", "w")
     try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError: return
     def _to(*_): log("timeout (Bluetooth permission prompt pending?) - exiting"); os._exit(0)
     signal.signal(signal.SIGALRM, _to); signal.alarm(60)
-    dev = asyncio.run(present(float(os.environ.get("OMI_SCAN_SECONDS", "20"))))
-    if not dev: return  # away: stay quiet
+    if address is None and len(sys.argv) > 2 and sys.argv[1] == "--address": address = sys.argv[2]
+    if address:
+        class dev: pass
+        dev.address = address
+    else:
+        dev = asyncio.run(present(float(os.environ.get("OMI_SCAN_SECONDS", "20"))))
+        if not dev: print("pendant not found"); return  # away: stay quiet
     signal.alarm(1800)
     log(f"pendant found {dev.address}")
     from omi_local import ring, transcribe

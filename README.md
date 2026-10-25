@@ -1,43 +1,56 @@
 # omi-local
 
-Use an Omi pendant with **no subscription and no cloud**: pull offline recordings over Bluetooth to a Mac,
-transcribe locally with whisper.cpp (Metal), and write agent-readable Markdown/JSONL. See `AGENTS.md`.
+Free, local alternative to Omi's paid sync: your Mac pulls recordings from the **Omi pendant** over BLE when you get home,
+transcribes them on-device (whisper.cpp + Silero VAD), and writes per-day Markdown + JSONL that any AI agent can read.
+Nothing is uploaded. Nothing is ever deleted from the pendant.
+
+## AIに渡すだけ / Just hand it to your AI agent
+
+Copy-paste this to an AI agent that has shell access to your Mac (Claude Code, Codex, Cursor, …):
 
 ```
-pendant --BLE storage service--> omi_local.pull --> ~/OmiData/raw/<day>/*.bin,*.wav
-                                  omi_local.transcribe (whisper.cpp) --> ~/OmiData/days/<day>.md + index.jsonl
-                                  any agent (cron / bot) --> summaries, ToDos, Notion ...
+Set up https://github.com/nyanko3141592/omi-local on this Mac by following AGENTS.md exactly
+(section "Setup procedure"). Run ./setup.sh, then make doctor, and tell me which manual steps
+I must do myself (Bluetooth permission, iPhone Shortcut). Never delete anything from the pendant.
 ```
 
-## Setup (Apple Silicon)
-```bash
-brew install whisper-cpp ffmpeg opus
-git clone https://github.com/nyanko3141592/omi-local ~/Dev/omi-local && cd ~/Dev/omi-local
-git clone https://github.com/cgallic/omi-pendant-chronicle   # BLE storage protocol (used as a library)
-python3 -m venv .venv && .venv/bin/pip install -e ./omi-pendant-chronicle/desktop-collector opuslib
-mkdir -p models && curl -L -o models/ggml-large-v3-turbo.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
-```
-Grant Bluetooth permission to your terminal / python when macOS asks.
-The pendant accepts **one** BLE central: close the phone Omi app (or turn off phone Bluetooth) while syncing.
+日本語: 上の文をそのままエージェントに貼れば、AGENTS.md の手順通りにセットアップします。人間がやるのは「Bluetooth許可」と「iPhoneショートカット」だけです。
 
-## Use
-```bash
-.venv/bin/pendant-collector scan          # find pendant
-.venv/bin/python -m omi_local.pull --list # list stored recordings (count/bytes)
-.venv/bin/python -m omi_local.pull --max-files 1
-.venv/bin/python -m omi_local.transcribe
-```
-`pull` never deletes recordings from the pendant (trial phase). Already-pulled files are tracked in
-`~/OmiData/state/pulled.json`.
+## How it works / 仕組み
 
-## Auto-sync when home (launchd)
-`launchd/me.omi-local.sync.plist.template` runs pull+transcribe every 15 min; when the pendant is in range
-(= you're home) it syncs. Install: copy to `~/Library/LaunchAgents/me.omi-local.sync.plist`, then
-`launchctl load ~/Library/LaunchAgents/me.omi-local.sync.plist`.
+1. iPhone Shortcut turns iPhone Bluetooth **off** when you join home Wi-Fi → the pendant is released (it accepts only one BLE central).
+2. `me.omi-local.watch` (launchd, KeepAlive) does a duty-cycled passive BLE scan (8 s on / 52 s off). When the pendant advertises it pulls **new unread** audio (no ADVANCE/CLEAR), disconnects, transcribes, appends.
+3. Cooldown: re-syncs only after the pendant disappears (>10 min) and reappears, or at most every 60 min while visible.
+4. Output in `~/OmiData/` (outside the repo) → see AGENTS.md "Consuming the data".
+
+## Commands / コマンド
+
+| | |
+|---|---|
+| `./setup.sh` | idempotent install (brew deps, venv, models, launchd watcher) |
+| `make doctor` | health check |
+| `make sync` | sync now (manual, 20 s scan) |
+| `make stop` / `make start` | stop / start the watcher |
+| `make logs` | recent log lines (`~/OmiData/logs/`) |
+| `make uninstall` | remove the watcher (keeps code and data) |
+
+Tunables (env in the plist): `OMI_SCAN_ON_S`, `OMI_SCAN_OFF_S`, `OMI_GONE_AFTER_S`, `OMI_RESYNC_MIN`, `OMI_DATA_DIR`.
+
+## iPhoneを自動で手放す（ショートカット） / Release the pendant from iPhone automatically
+
+Shortcuts app → オートメーション / Automation:
+1. **Wi-Fi** (select your home network) → **接続時 / When joining** → **すぐに実行 / Run Immediately** → action **Bluetoothを設定: オフ / Set Bluetooth: Off**
+2. **Wi-Fi** (same network) → **接続解除時 / When leaving** → **すぐに実行** → **Bluetoothを設定: オン / On**
+
+Caveat: AirPods / Apple Watch are also disconnected from the iPhone while you're home.
 
 ## Privacy
-`.gitignore` excludes audio, transcripts, models, logs, keys. Data lives in `~/OmiData` outside the repo.
+`.gitignore` excludes audio, transcripts, models, logs, keys. Data lives only in `~/OmiData`.
+
+## Transcription quality
+whisper large-v3-turbo + Silero VAD + `--suppress-nst`, then a filter drops repeated-token hallucinations
+(e.g. `どんどんどん…`) and stock phrases (`ご視聴ありがとうございました`). No speaker labels.
+
 
 ## Firmware 3.0.20+ (ring-buffer storage) — use `omi_local.ring`
 Omi CV 1 / fw 3.0.21 does NOT use the old file protocol (`pull.py` / pendant-collector stall at 0 bytes).
@@ -59,27 +72,3 @@ Measured: ~38 KB/s over BLE on M-series Mac (≈ 0.2 MB per minute of audio).
   Bluetooth or kill the app, press the button once, scan again (`pendant-collector scan` or `ring --info`).
 - No pairing/bonding needed on macOS; no factory reset needed.
 - Without phone time sync, record timestamps may carry the uptime flag; ring.py then falls back to pull time.
-
-## Automatic sync (launchd)
-
-`omi_local/sync.py` runs every 15 min (label `me.omi-local.sync`): ~20s BLE scan → if the pendant is present, pull new unread audio (never ADVANCE/CLEAR) → transcribe (Whisper + Silero VAD + hallucination filter) → append to `~/OmiData/days/` and `index.jsonl`. Absent = silent exit. File lock prevents overlap; 60s watchdog on the scan. Logs: `~/OmiData/logs/`.
-
-```sh
-sed "s|__REPO__|$PWD|g; s|__HOME__|$HOME|g" launchd/me.omi-local.sync.plist.template > ~/Library/LaunchAgents/me.omi-local.sync.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/me.omi-local.sync.plist   # enable
-launchctl kickstart -k gui/$(id -u)/me.omi-local.sync                              # run now
-launchctl bootout gui/$(id -u)/me.omi-local.sync                                   # disable
-```
-
-If the log shows `timeout (Bluetooth permission prompt pending?)`, grant Bluetooth to Python in System Settings → Privacy & Security → Bluetooth.
-
-VAD model: `curl -L -o models/ggml-silero-v5.1.2.bin https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin`
-
-## iPhoneを自動で手放す（ショートカット）
-
-The pendant connects to only one BLE central at a time, so the iPhone must release it for the Mac's launchd sync to work. Use iOS Shortcuts → オートメーション:
-
-1. **Wi-Fi**（自宅のSSIDを選択）→ **接続時** → **すぐに実行** → アクション「Bluetoothを設定: **オフ**」
-2. **Wi-Fi**（同じSSID）→ **接続解除時** → **すぐに実行** → 「Bluetoothを設定: **オン**」
-
-Caveat: while at home, AirPods / Apple Watch etc. are also disconnected from the iPhone.
