@@ -25,6 +25,7 @@ Hard rules: never send CLEAR; ADVANCE/audio deletion only via the config flags i
    counts, and `make sync` should create `~/OmiData/days/<today>.md`. If the pendant isn't found: LED blue = still connected to the phone.
 6. **Report** to the human: label `me.omi-local.watch`, stop with `make stop` (`launchctl bootout gui/$(id -u)/me.omi-local.watch`),
    data at `~/OmiData`. State the retention config. If `advance_pendant` is off, the pendant eventually fills (≈0.2 MB/min audio). Logs: `~/OmiData/logs/{sync,advance,delete}.log`.
+6b. **Operations** — for day-to-day questions follow `docs/OPERATIONS.md` (commands, config, troubleshooting).
 7. **Uninstall** — `make uninstall` (keeps code and data).
 
 ## Consuming the data (Grok Bots, Codex, any agent with shell on the Mac)

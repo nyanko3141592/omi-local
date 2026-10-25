@@ -16,6 +16,18 @@ I must do myself (Bluetooth permission, iPhone Shortcut). Never delete anything 
 
 日本語: 上の文をそのままエージェントに貼れば、AGENTS.md の手順通りにセットアップします。人間がやるのは「Bluetooth許可」と「iPhoneショートカット」だけです。
 
+## First-time setup / 初回セットアップ (human steps, in order)
+
+After `./setup.sh` (or your agent) finishes:
+1. Delete the Omi iPhone app / iPhoneのOmiアプリを削除
+2. iOS Settings → Bluetooth → Omi (i) → **Forget This Device** / このデバイスの登録を解除
+3. Mac: System Settings → Privacy & Security → Bluetooth → allow **Python**. Trigger the prompt with `cd ~/Dev/omi-local && make sync`.
+4. Press the pendant button once / ペンダントのボタンを1回押す
+5. After a few minutes: `make logs` → confirm `time sync`, `pulled`, and (if enabled) `tail ~/OmiData/logs/advance.log` shows `ADVANCE … ack=0`.
+6. Optional: don't sleep on power — System Settings → Battery → Options, or `sudo pmset -c sleep 0`.
+
+Daily use, config, troubleshooting, firmware updates, backup: **[docs/OPERATIONS.md](docs/OPERATIONS.md)**.
+
 ## How it works / 仕組み
 
 Design: **the Mac is the pendant's only BLE central** (delete the Omi iPhone app and forget the device in iOS Bluetooth settings).
