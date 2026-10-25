@@ -1,0 +1,26 @@
+# NEVER commit data or secrets
+*.wav
+*.opus
+*.bin
+*.raw
+*.m4a
+*.aiff
+models/
+data/
+recordings/
+audio/
+transcripts/
+OmiData/
+*.jsonl
+logs/
+*.log
+.env
+.env.*
+*.key
+*secret*
+.venv/
+__pycache__/
+*.egg-info/
+omi-pendant-chronicle/
+omi-src/
+state.json
