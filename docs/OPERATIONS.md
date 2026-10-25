@@ -86,3 +86,8 @@ Back up `~/OmiData` yourself (Time Machine, etc.) if you want it. Nothing is upl
 ## Uninstall / アンインストール
 
 `make uninstall` (removes the launchd agent). Then optionally delete the repo dir. `~/OmiData` is never removed automatically.
+
+## Pairing
+- `make list` / `make pair [ADDR=..]` / `make unpair`. Stored in config.json as `pendant_address`, `pendant_serial` (not env-overridable).
+- Only the paired pendant is synced; others logged as "ignoring other Omi". Serial mismatch → abort, no ADVANCE (logged).
+- iOS app: own pairing; reset with 「このペンダントを登録し直す」.

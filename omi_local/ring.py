@@ -27,10 +27,13 @@ def frames_of(records):
     return out
 
 async def find(address=None):
+    from omi_local import pairing
+    saved = config.get("pendant_address")
+    if address and saved and address != saved: raise SystemExit(f"refusing {address}: paired pendant is {saved} (make unpair to change)")
     if address: return address
-    d = await BleakScanner.find_device_by_filter(lambda dv, ad: (ad.local_name or "") in ("Omi", "Friend"), timeout=30)
-    if not d: raise SystemExit("pendant not found")
-    return d
+    a = pairing.choose(await pairing.scan_all(15))
+    if not a: raise SystemExit("paired pendant not found" if saved else "no single unpaired Omi found (make pair)")
+    return a
 
 async def sync_time(c):
     """Same as the official app (omi_connection.dart performSyncTime): u32 LE unix seconds -> 19b10031."""
@@ -103,8 +106,17 @@ async def wait_ack(q, t=5):
 
 async def run(a):
     q = asyncio.Queue()
-    async with BleakClient(await find(a.address), timeout=45) as c:
+    addr = await find(a.address)
+    async with BleakClient(addr, timeout=45) as c:
         fw = bytes(await c.read_gatt_char(DIS_FW)).decode(errors="ignore")
+        from omi_local import pairing
+        serial = await pairing.read_serial(c); want = config.get("pendant_serial")
+        if want and serial != want:
+            config.log("sync.log", f"serial mismatch at {addr}: got {serial!r}, paired {want!r}; aborting (no pull, no ADVANCE)")
+            raise SystemExit("serial mismatch")
+        if not config.get("pendant_address"):
+            config.set_many({"pendant_address": addr, "pendant_serial": serial}); config.log("sync.log", f"auto-paired {addr} serial={serial}")
+        elif not want and serial: config.set_many({"pendant_serial": serial})
         if config.get("sync_time") and not a.info:
             try: await sync_time(c)
             except Exception as e: config.log("sync.log", f"time sync failed: {e!r}")
@@ -148,7 +160,7 @@ async def run(a):
                 config.log("sync.log", f"chunk seq {rs} NOT verified ({detail}); stopping, no advance"); return
             new = rs + got
             stf.write_text(json.dumps({"next_seq": new, "verified_upto": new}))
-            if advance: await advance_to(c, q, new, rs, detail)
+            if advance: await advance_to(c, q, new, rs, f"{detail} serial={serial}")
             rs = new; total += got
             if got < n: break
             ws = max(ws, (await info())[1])

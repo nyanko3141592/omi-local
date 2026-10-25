@@ -112,3 +112,11 @@ Measured: ~38 KB/s over BLE on M-series Mac (≈ 0.2 MB per minute of audio).
   Bluetooth or kill the app, press the button once, scan again (`pendant-collector scan` or `ring --info`).
 - No pairing/bonding needed on macOS; no factory reset needed.
 - Without phone time sync, record timestamps may carry the uptime flag; ring.py then falls back to pull time.
+
+## Pendant pairing (never touches someone else's Omi)
+The Mac only pulls from / ADVANCEs the pendant saved as `pendant_address` (+ `pendant_serial`, Device Information 0x2A25) in `~/OmiData/config.json`.
+- First sync auto-pairs **only if exactly one** Omi is visible. Several visible → it refuses and logs; run `make list` then `make pair ADDR=<address>`.
+- Other Omis nearby are ignored and logged (`logs/sync.log`, "ignoring other Omi"). A serial mismatch aborts before any pull or ADVANCE.
+- `make unpair` to switch pendants. `make doctor` warns if unpaired.
+- The iOS battery app keeps its own pairing (iOS peripheral IDs differ from the Mac's): first pendant it reads is remembered; 「このペンダントを登録し直す」 resets it.
+- Why a native app and not a web page: iOS Safari has no Web Bluetooth. Third-party browsers (Bluefy) work but show a device picker every time; Android Chrome supports Web Bluetooth.

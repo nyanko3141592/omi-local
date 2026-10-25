@@ -8,24 +8,14 @@ Between syncs nothing stays connected, so the pendant and Mac idle.
 import asyncio, os, subprocess, sys, time
 from bleak import BleakScanner
 from omi_local.sync import log
+from omi_local import pairing
 
 SCAN_ON = float(os.environ.get("OMI_SCAN_ON_S", "8"))       # seconds scanning per cycle
 SCAN_OFF = float(os.environ.get("OMI_SCAN_OFF_S", "52"))    # seconds idle per cycle
 RESYNC = float(os.environ.get("OMI_RESYNC_MIN", "15")) * 60
 
-def is_omi(d, ad):
-    return (ad.local_name or d.name or "") in ("Omi", "Friend") or any(u.lower().startswith("19b10000") for u in ad.service_uuids)
-
 async def scan_once():
-    found = None
-    def cb(d, ad):
-        nonlocal found
-        if found is None and is_omi(d, ad): found = d.address
-    async with BleakScanner(detection_callback=cb):
-        t = time.monotonic()
-        while found is None and time.monotonic() - t < SCAN_ON:
-            await asyncio.sleep(0.5)
-    return found
+    return pairing.choose(await pairing.scan_all(SCAN_ON))
 
 async def loop():
     log("watcher started")

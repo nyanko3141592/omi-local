@@ -12,10 +12,11 @@ def log(msg):
         f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
 
 async def present(timeout=20):
-    d = await BleakScanner.find_device_by_filter(
-        lambda dv, ad: (ad.local_name or "") in ("Omi", "Friend") or any(u.startswith("19b10000") for u in ad.service_uuids),
-        timeout=timeout)
-    return d
+    from omi_local import pairing
+    a = pairing.choose(await pairing.scan_all(timeout))
+    if a is None: return None
+    class D: pass
+    D.address = a; return D
 
 def main(address=None):
     DATA.mkdir(parents=True, exist_ok=True)

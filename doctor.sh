@@ -7,6 +7,8 @@ command -v whisper-cli >/dev/null && ok whisper-cli || ng "whisper-cli (brew ins
 [[ -s models/ggml-large-v3-turbo.bin ]] && ok "whisper model" || ng "whisper model missing"
 [[ -s models/ggml-silero-v5.1.2.bin ]] && ok "VAD model" || ng "VAD model missing"
 [[ -d "$DATA" ]] && ok "data dir $DATA" || ng "data dir $DATA"
+PA=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('pendant_address',''))" "$DATA/config.json" 2>/dev/null)
+[[ -n "$PA" ]] && ok "paired pendant $PA" || echo "WARN no pendant_address in config.json: first sync auto-pairs only if exactly one Omi is visible; run 'make pair'"
 st=$(launchctl print "gui/$(id -u)/me.omi-local.watch" 2>/dev/null | awk '/^\tstate/{print $3; exit}')
 [[ "$st" == running ]] && ok "launchd me.omi-local.watch running" || ng "launchd watcher not running (state=$st)"
 L=$(ls -t "$DATA"/logs/sync-*.log 2>/dev/null | head -1)

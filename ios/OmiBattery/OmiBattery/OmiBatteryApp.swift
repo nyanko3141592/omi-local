@@ -24,6 +24,9 @@ final class BatteryReader: NSObject, ObservableObject, CBCentralManagerDelegate,
     private var cm: CBCentralManager?
     private var target: CBPeripheral?
     private var timer: Timer?
+    /// iOS's own peripheral identifier (differs from the Mac's). Set on first successful read.
+    @Published var paired: UUID? = (UserDefaults.standard.string(forKey: "paired")).flatMap(UUID.init)
+    func reRegister() { UserDefaults.standard.removeObject(forKey: "paired"); paired = nil; start() }
 
     func start() {
         guard target == nil else { return }
@@ -34,10 +37,19 @@ final class BatteryReader: NSObject, ObservableObject, CBCentralManagerDelegate,
             self?.finish("見つかりません（Macと接続中？ボタンを1回押して再試行）/ Not found")
         }
     }
+    private var seen: [UUID: CBPeripheral] = [:]
     private func scan() {
+        seen = [:]
+        if paired == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                guard let self, self.target == nil, self.paired == nil else { return }
+                if self.seen.count == 1, let p = self.seen.values.first { self.connect(p) }
+                else if self.seen.count > 1 { self.finish("近くにOmiが\(self.seen.count)台。自分のだけ近づけて再試行 / Several Omis nearby") }
+            }
+        }
         guard cm?.state == .poweredOn else { return }
         // Already connected by this phone? (shouldn't be, but handle)
-        if let p = cm?.retrieveConnectedPeripherals(withServices: [Self.omiSvc]).first { connect(p); return }
+        if let p = cm?.retrieveConnectedPeripherals(withServices: [Self.omiSvc]).first(where: { paired == nil || $0.identifier == paired }) { connect(p); return }
         cm?.scanForPeripherals(withServices: nil, options: nil)
     }
     private func connect(_ p: CBPeripheral) {
@@ -60,7 +72,10 @@ final class BatteryReader: NSObject, ObservableObject, CBCentralManagerDelegate,
     func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral, advertisementData ad: [String: Any], rssi: NSNumber) {
         let name = (ad[CBAdvertisementDataLocalNameKey] as? String) ?? p.name ?? ""
         let svcs = (ad[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]) ?? []
-        if name == "Omi" || name == "Friend" || svcs.contains(Self.omiSvc) { connect(p) }
+        guard name == "Omi" || name == "Friend" || svcs.contains(Self.omiSvc) else { return }
+        if let id = paired, p.identifier != id { return }  // someone else's pendant: ignore
+        if paired == nil { seen[p.identifier] = p; return } // first time: collect, decide after a short window
+        connect(p)
     }
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) { p.discoverServices([Self.battSvc]) }
     func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) { finish("接続失敗 / Connect failed") }
@@ -75,6 +90,7 @@ final class BatteryReader: NSObject, ObservableObject, CBCentralManagerDelegate,
     func peripheral(_ p: CBPeripheral, didUpdateValueFor ch: CBCharacteristic, error: Error?) {
         guard let b = ch.value?.first else { return finish("読み取り失敗") }
         level = Int(b); at = Date()
+        if paired == nil { paired = p.identifier; UserDefaults.standard.set(p.identifier.uuidString, forKey: "paired") }
         UserDefaults.standard.set(level, forKey: "level"); UserDefaults.standard.set(at, forKey: "at")
         finish("OK（切断済み / disconnected）")
     }
@@ -90,6 +106,8 @@ struct ContentView: View {
             if let at = r.at { Text(at, style: .relative).font(.footnote).foregroundStyle(.secondary) + Text(" ago") .font(.footnote).foregroundStyle(.secondary) }
             Text(r.status).font(.callout).multilineTextAlignment(.center)
             Button("再読み込み / Refresh") { r.start() }.buttonStyle(.borderedProminent)
+            Text(r.paired == nil ? "未登録：最初に読めたペンダントを登録します" : "登録済みのペンダントのみ読みます").font(.caption2).foregroundStyle(.secondary)
+            Button("このペンダントを登録し直す / Re-register") { r.reRegister() }.font(.footnote)
         }.padding()
     }
 }

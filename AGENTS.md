@@ -61,3 +61,6 @@ PY
 
 ## Sync timing
 New data appears only after the pendant was released by the iPhone and the watcher synced (usually within ~1 min of arriving home + transfer/transcribe time). `index.jsonl` is append-only.
+
+## Pairing (required for safety)
+After setup run `make list`. If exactly one Omi (the user's) is visible, `make pair`; if several, ask the user which one and `make pair ADDR=<address>`. Never pair a device the user hasn't confirmed. `make doctor` must show "paired pendant".
