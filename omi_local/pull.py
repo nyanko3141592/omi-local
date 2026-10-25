@@ -21,6 +21,11 @@ async def run(args):
                             dry_run_delete=True, use_lease=False)
     dev = await c._resolve_device()
     client = await c._open_client(c._connect_target(dev))
+    try:  # fw 3.x may stream file data on the storage READ characteristic
+        from pendant_collector import uuids
+        await client.start_notify(uuids.STORAGE_READ_CHAR, c._on_storage_notify)
+    except Exception as e:
+        print(json.dumps({"read_char_notify": str(e)}))
     try:
         files = await c.list_files(client)
         print(json.dumps({"device": getattr(dev, "address", str(dev)), "files": len(files),

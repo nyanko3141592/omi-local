@@ -38,3 +38,24 @@ The pendant accepts **one** BLE central: close the phone Omi app (or turn off ph
 
 ## Privacy
 `.gitignore` excludes audio, transcripts, models, logs, keys. Data lives in `~/OmiData` outside the repo.
+
+## Firmware 3.0.20+ (ring-buffer storage) — use `omi_local.ring`
+Omi CV 1 / fw 3.0.21 does NOT use the old file protocol (`pull.py` / pendant-collector stall at 0 bytes).
+It uses the ring protocol (omi `app/lib/services/devices/ring_protocol.dart`): status read on `...5782`,
+commands on `...5781` (`0x10` INFO, `0x11` READ start_seq+count, `0x12` ADVANCE = reclaim). Records are 444 B
+(`[ts:4 BE][440 B packed opus]`). `ring.py` reads unread packets and **never sends ADVANCE/CLEAR**, so the
+pendant keeps everything (it will re-read from read_seq each time until advance is enabled later).
+```bash
+.venv/bin/python -m omi_local.ring --info      # fw, unread packets, free bytes
+.venv/bin/python -m omi_local.ring             # pull unread -> ~/OmiData/raw/<day>/
+.venv/bin/python -m omi_local.transcribe
+```
+Measured: ~38 KB/s over BLE on M-series Mac (≈ 0.2 MB per minute of audio).
+
+## Troubleshooting
+- LED: solid red = on, not connected; blinking red = time not synced; solid blue = connected (to phone *or* Mac);
+  green+red/blue blinking = charging; purple = factory reset in progress.
+- Only one BLE central at a time: if the phone Omi app is connected the pendant won't show up. Turn off phone
+  Bluetooth or kill the app, press the button once, scan again (`pendant-collector scan` or `ring --info`).
+- No pairing/bonding needed on macOS; no factory reset needed.
+- Without phone time sync, record timestamps may carry the uptime flag; ring.py then falls back to pull time.
