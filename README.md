@@ -61,6 +61,9 @@ Sync only happens while the Mac is awake. Recommended for a desktop/always-plugg
 - System Settings → Battery/Energy → Options → **Prevent automatic sleeping on power adapter when the display is off** = on
 - or `sudo pmset -c sleep 0` (on charger only; revert with `sudo pmset -c sleep 1`). Leave battery settings alone.
 
+## Battery / 電池残量
+Each sync writes `~/OmiData/battery.json`. On the go: one-tap iPhone app **[ios/OmiBattery](ios/OmiBattery/README.md)** (build with Xcode + free Apple ID).
+
 ## Commands / コマンド
 
 | | |

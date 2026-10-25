@@ -24,3 +24,9 @@ __pycache__/
 omi-pendant-chronicle/
 omi-src/
 state.json
+
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate

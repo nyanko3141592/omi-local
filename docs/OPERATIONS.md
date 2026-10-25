@@ -41,6 +41,12 @@
 | `~/OmiData/processed/<agent>.json` | per-agent "already processed" cursor |
 | `~/OmiData/logs/` | `sync-YYYY-MM.log`, `advance.log`, `delete.log`, `launchd.{out,err}.log` |
 
+## Battery / 電池残量
+
+- Every sync reads the pendant battery (standard 0x180F/0x2A19) → `~/OmiData/battery.json`
+  (`level`, `time`, `drain_pct_per_hour`, `hours_left_est` once ≥1 h of discharge history), history in `state/battery_history.jsonl`, log `logs/battery.log`.
+- On the go: iPhone app [ios/OmiBattery](../ios/OmiBattery/README.md) — one tap, reads and disconnects (doesn't block the Mac sync).
+
 ## Agents / エージェントの読み方
 
 Read `index.jsonl`, skip ids listed in your own `~/OmiData/processed/<agent>.json` (`{"processed_ids": [...]}`),

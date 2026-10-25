@@ -9,6 +9,7 @@ from pathlib import Path
 from bleak import BleakClient, BleakScanner
 from omi_local import config
 CTRL = "30295781-4301-eabd-2904-2849adfeae43"; STATUS = "30295782-4301-eabd-2904-2849adfeae43"
+BATT = "00002a19-0000-1000-8000-00805f9b34fb"  # standard Battery Service 0x180F / Battery Level 0x2A19
 DIS_FW = "00002a26-0000-1000-8000-00805f9b34fb"
 TIME_W = "19b10031-e8f2-537e-4f6c-d104768a1214"; TIME_R = "19b10032-e8f2-537e-4f6c-d104768a1214"
 DATA = config.DATA
@@ -74,6 +75,25 @@ def save_chunk(buf, rs, meta):
         "frames_ok": ok, "frames_bad": bad, "verified": verified, "tmap": tmap, **meta}).encode())
     return verified, len(recs), d / stem, f"packets={len(recs)} sha256={sha[:12]} frames ok={ok} bad={bad}"
 
+def record_battery(level):
+    """Append to state/battery_history.jsonl, write battery.json {level, ts, drain_pct_per_hour}."""
+    now = int(time.time()); h = DATA / "state" / "battery_history.jsonl"; h.parent.mkdir(parents=True, exist_ok=True)
+    hist = [json.loads(l) for l in h.open()] if h.exists() else []
+    with h.open("a") as f: f.write(json.dumps({"ts": now, "level": level}) + "\n")
+    hist.append({"ts": now, "level": level})
+    # drain over the latest monotonic-decreasing run (ignores charging), needs >=1h span
+    run = [hist[-1]]
+    for x in reversed(hist[:-1]):
+        if x["level"] >= run[-1]["level"]: run.append(x)
+        else: break
+    drain = None
+    if len(run) > 1 and now - run[-1]["ts"] >= 3600:
+        drain = round((run[-1]["level"] - level) / ((now - run[-1]["ts"]) / 3600), 2)
+    out = {"level": level, "ts": now, "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), "drain_pct_per_hour": drain,
+           "hours_left_est": round(level / drain, 1) if drain else None}
+    (DATA / "battery.json").write_text(json.dumps(out))
+    config.log("battery.log", f"battery {level}% drain={drain}%/h"); print(json.dumps({"battery": out}))
+
 async def wait_ack(q, t=5):
     end = time.time() + t
     while time.time() < end:
@@ -88,6 +108,8 @@ async def run(a):
         if config.get("sync_time") and not a.info:
             try: await sync_time(c)
             except Exception as e: config.log("sync.log", f"time sync failed: {e!r}")
+        try: record_battery((await c.read_gatt_char(BATT))[0])
+        except Exception as e: config.log("sync.log", f"battery read failed: {e!r}")
         st = struct.unpack("<4I", bytes(await c.read_gatt_char(STATUS))[:16])
         await c.start_notify(CTRL, lambda _, d: q.put_nowait(bytes(d)))
         async def info():
