@@ -59,3 +59,27 @@ Measured: ~38 KB/s over BLE on M-series Mac (≈ 0.2 MB per minute of audio).
   Bluetooth or kill the app, press the button once, scan again (`pendant-collector scan` or `ring --info`).
 - No pairing/bonding needed on macOS; no factory reset needed.
 - Without phone time sync, record timestamps may carry the uptime flag; ring.py then falls back to pull time.
+
+## Automatic sync (launchd)
+
+`omi_local/sync.py` runs every 15 min (label `me.omi-local.sync`): ~20s BLE scan → if the pendant is present, pull new unread audio (never ADVANCE/CLEAR) → transcribe (Whisper + Silero VAD + hallucination filter) → append to `~/OmiData/days/` and `index.jsonl`. Absent = silent exit. File lock prevents overlap; 60s watchdog on the scan. Logs: `~/OmiData/logs/`.
+
+```sh
+sed "s|__REPO__|$PWD|g; s|__HOME__|$HOME|g" launchd/me.omi-local.sync.plist.template > ~/Library/LaunchAgents/me.omi-local.sync.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/me.omi-local.sync.plist   # enable
+launchctl kickstart -k gui/$(id -u)/me.omi-local.sync                              # run now
+launchctl bootout gui/$(id -u)/me.omi-local.sync                                   # disable
+```
+
+If the log shows `timeout (Bluetooth permission prompt pending?)`, grant Bluetooth to Python in System Settings → Privacy & Security → Bluetooth.
+
+VAD model: `curl -L -o models/ggml-silero-v5.1.2.bin https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin`
+
+## iPhoneを自動で手放す（ショートカット）
+
+The pendant connects to only one BLE central at a time, so the iPhone must release it for the Mac's launchd sync to work. Use iOS Shortcuts → オートメーション:
+
+1. **Wi-Fi**（自宅のSSIDを選択）→ **接続時** → **すぐに実行** → アクション「Bluetoothを設定: **オフ**」
+2. **Wi-Fi**（同じSSID）→ **接続解除時** → **すぐに実行** → 「Bluetoothを設定: **オン**」
+
+Caveat: while at home, AirPods / Apple Watch etc. are also disconnected from the iPhone.

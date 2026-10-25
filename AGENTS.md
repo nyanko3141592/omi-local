@@ -27,3 +27,6 @@ new = [json.loads(l) for l in open(d/"index.jsonl") if json.loads(l)["id"] not i
 print(len(new))
 PY
 ```
+
+## Sync timing
+New data arrives only while the iPhone has released the pendant (see README「iPhoneを自動で手放す（ショートカット）」) and the Mac's `me.omi-local.sync` launchd job runs (every 15 min). Treat `index.jsonl` as append-only.

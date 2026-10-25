@@ -2,9 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>me.omi-local.sync</string>
-  <key>ProgramArguments</key><array><string>/bin/zsh</string><string>-lc</string>
-    <string>cd ~/Dev/omi-local &amp;&amp; .venv/bin/python -m omi_local.pull &amp;&amp; .venv/bin/python -m omi_local.transcribe</string></array>
+  <key>ProgramArguments</key><array>
+    <string>__REPO__/.venv/bin/python</string><string>-m</string><string>omi_local.sync</string></array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
   <key>StartInterval</key><integer>900</integer>
-  <key>StandardOutPath</key><string>/tmp/omi-local.log</string>
-  <key>StandardErrorPath</key><string>/tmp/omi-local.log</string>
+  <key>RunAtLoad</key><true/>
+  <key>LowPriorityIO</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>__HOME__/OmiData/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/OmiData/logs/launchd.err.log</string>
 </dict></plist>
